@@ -48,6 +48,8 @@ jobs:
 
       - name: Build server
         working-directory: lockbook
+        env:
+          RUSTFLAGS: -l advapi32
         run: cargo build -p lockbook-server --release
 
       - name: Start server
