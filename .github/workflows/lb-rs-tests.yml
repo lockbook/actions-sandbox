@@ -1,0 +1,89 @@
+name: lb-rs tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: lockbook/lockbook ref to test (branch, tag, or commit)
+        default: master
+        type: string
+      filter:
+        description: cargo test name filter; empty runs every lb-rs test
+        default: ""
+        type: string
+      patch:
+        description: path in this repo to a patch applied to the lockbook checkout first (for example patches/issue-1234.patch)
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      API_URL: http://localhost:8000
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: lockbook/lockbook
+          ref: ${{ inputs.ref }}
+          path: lockbook
+
+      - name: Record revision
+        working-directory: lockbook
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "lockbook revision: $sha"
+          {
+            echo "## lockbook revision"
+            echo "\`$sha\` (ref \`${{ inputs.ref }}\`)"
+            echo "filter: \`${{ inputs.filter }}\` patch: \`${{ inputs.patch }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply patch
+        if: inputs.patch != ''
+        working-directory: lockbook
+        run: |
+          git apply --3way "$GITHUB_WORKSPACE/${{ inputs.patch }}"
+          git --no-pager diff --stat
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config cmake libfontconfig1-dev psmisc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lockbook
+
+      - name: Start server
+        working-directory: lockbook
+        run: cargo run -p lbdev -- ci start-server
+
+      - name: Run lb-rs tests
+        working-directory: lockbook
+        run: cargo test -p lb-rs --no-fail-fast -- ${{ inputs.filter }}
+
+      - name: Collect server log
+        if: always()
+        working-directory: lockbook
+        run: cargo run -p lbdev -- ci server-logs > "$GITHUB_WORKSPACE/server_log.txt" || true
+
+      - name: Upload server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log
+          path: server_log.txt
+          if-no-files-found: ignore
+
+      - name: Stop server
+        if: always()
+        working-directory: lockbook
+        run: cargo run -p lbdev -- ci kill-server || true
