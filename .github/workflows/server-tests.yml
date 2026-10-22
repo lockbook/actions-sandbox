@@ -1,0 +1,84 @@
+name: server tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: lockbook/lockbook ref to test (branch, tag, or commit)
+        default: master
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      API_URL: http://localhost:8000
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: lockbook/lockbook
+          ref: ${{ inputs.ref }}
+          path: lockbook
+
+      - name: Record revision
+        working-directory: lockbook
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "lockbook revision: $sha"
+          echo "## lockbook revision" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$sha\` (ref \`${{ inputs.ref }}\`)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config cmake libfontconfig1-dev psmisc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lockbook
+
+      - name: Start server
+        working-directory: lockbook
+        run: cargo run -p lbdev -- ci start-server
+
+      - name: Run lockbook-server tests
+        working-directory: lockbook
+        run: |
+          set -a
+          . server/local.env
+          set +a
+          cargo test -p lockbook-server --no-fail-fast
+
+      - name: Run test_utils tests
+        if: ${{ !cancelled() }}
+        working-directory: lockbook
+        run: |
+          set -a
+          . server/local.env
+          set +a
+          cargo test -p test_utils --no-fail-fast
+
+      - name: Collect server log
+        if: always()
+        working-directory: lockbook
+        run: cargo run -p lbdev -- ci server-logs > "$GITHUB_WORKSPACE/server_log.txt" || true
+
+      - name: Upload server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log
+          path: server_log.txt
+          if-no-files-found: ignore
+
+      - name: Stop server
+        if: always()
+        working-directory: lockbook
+        run: cargo run -p lbdev -- ci kill-server || true
