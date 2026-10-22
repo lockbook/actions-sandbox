@@ -23,3 +23,19 @@ Builds the `lockbook` CLI, creates a throwaway account on the local server, writ
 ```
 gh workflow run cli-smoke.yml -R lockbook/actions-sandbox -f ref=<sha|branch>
 ```
+
+## server tests
+
+Starts a local lockbook server, then runs `cargo test -p lockbook-server --no-fail-fast` and `cargo test -p test_utils --no-fail-fast` with `server/local.env` exported. The server log is uploaded as the `server-log` artifact.
+
+```
+gh workflow run server-tests.yml -R lockbook/actions-sandbox -f ref=<sha|branch>
+```
+
+## cli smoke windows
+
+Same idea as `cli smoke` but on `windows-latest` with PowerShell steps. Builds the CLI and a release server, starts the server directly (lbdev's `ci start-server` relies on `fuser` and `/tmp`), polls `/get-build-info` until it answers, then creates an account, writes a file, and runs `list`, `cat`, `sync`, and `account status`. Server stdout, stderr, and `lockbook_server.log` are uploaded as the `server-log` artifact.
+
+```
+gh workflow run cli-smoke-windows.yml -R lockbook/actions-sandbox -f ref=<sha|branch>
+```
