@@ -36,7 +36,8 @@ jobs:
 
       - name: Record revision
         working-directory: lockbook
-        run: echo "lockbook revision: $(git rev-parse HEAD)"
+        run: |
+          echo "lockbook revision: $(git rev-parse HEAD)"
 
       - name: cargo install ${{ matrix.args }}
         run: |
