@@ -1,0 +1,77 @@
+name: headless tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: lockbook/lockbook ref to test (branch, tag, or commit)
+        default: master
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: lockbook/lockbook
+          ref: ${{ inputs.ref }}
+          path: lockbook
+
+      - name: Record revision
+        working-directory: lockbook
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "lockbook revision: $sha"
+          echo "## lockbook revision" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$sha\` (ref \`${{ inputs.ref }}\`)" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lockbook
+
+      - name: Test workspace
+        id: workspace
+        continue-on-error: true
+        working-directory: lockbook
+        run: cargo test -p workspace --no-fail-fast
+
+      - name: Test lockbook-desktop
+        id: desktop
+        continue-on-error: true
+        working-directory: lockbook
+        run: cargo test -p lockbook-desktop --no-fail-fast
+
+      - name: Test lockbook (cli)
+        id: cli
+        continue-on-error: true
+        working-directory: lockbook
+        run: cargo test -p lockbook --no-fail-fast
+
+      - name: Test test_utils
+        id: test_utils
+        continue-on-error: true
+        working-directory: lockbook
+        run: cargo test -p test_utils --no-fail-fast
+
+      - name: Fail if any package failed
+        run: |
+          {
+            echo "## package outcomes"
+            echo "workspace: ${{ steps.workspace.outcome }}"
+            echo "lockbook-desktop: ${{ steps.desktop.outcome }}"
+            echo "lockbook: ${{ steps.cli.outcome }}"
+            echo "test_utils: ${{ steps.test_utils.outcome }}"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          test "${{ steps.workspace.outcome }}" = success
+          test "${{ steps.desktop.outcome }}" = success
+          test "${{ steps.cli.outcome }}" = success
+          test "${{ steps.test_utils.outcome }}" = success
