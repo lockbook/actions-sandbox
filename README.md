@@ -47,3 +47,11 @@ No server and no system packages. Runs `cargo test --no-fail-fast` for `workspac
 ```
 gh workflow run headless-tests.yml -R lockbook/actions-sandbox -f ref=<sha|branch>
 ```
+
+## cli install warnings
+
+Three parallel jobs run `cargo install` from a clean target so every rustc warning is emitted: the checkout's CLI with `--locked`, the published `lockbook` crate with `--locked`, and the published crate unlocked. Each job's step summary lists the warnings and the count of `use of deprecated`.
+
+```
+gh workflow run cli-install.yml -R lockbook/actions-sandbox -f ref=<sha|branch>
+```

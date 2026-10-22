@@ -1,0 +1,68 @@
+name: cli install warnings
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: lockbook/lockbook ref for the path install (branch, tag, or commit)
+        default: master
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: path-locked
+            args: --path lockbook/clients/cli --locked
+          - mode: crate-locked
+            args: lockbook --locked
+          - mode: crate-unlocked
+            args: lockbook
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: lockbook/lockbook
+          ref: ${{ inputs.ref }}
+          path: lockbook
+
+      - name: Record revision
+        working-directory: lockbook
+        run: echo "lockbook revision: $(git rev-parse HEAD)"
+
+      - name: cargo install ${{ matrix.args }}
+        run: |
+          cargo install ${{ matrix.args }} --root "$RUNNER_TEMP/inst" 2>&1 | tee "install-${{ matrix.mode }}.log"
+          test "${PIPESTATUS[0]}" -eq 0
+
+      - name: Summarize warnings
+        if: always()
+        run: |
+          log="install-${{ matrix.mode }}.log"
+          {
+            echo "## ${{ matrix.mode }}: cargo install ${{ matrix.args }}"
+            echo
+            echo "lb-rs line: $(grep -E 'Compiling lb-rs|Installing lockbook' "$log" | head -2 | tr '\n' ' ')"
+            echo
+            echo '```'
+            grep -E "^warning" "$log" | sort | uniq -c || true
+            echo '```'
+            echo
+            echo "deprecated: $(grep -c 'use of deprecated' "$log" || true)"
+            grep -B2 -A8 'use of deprecated' "$log" | head -40 || true
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload install log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-${{ matrix.mode }}-log
+          path: install-${{ matrix.mode }}.log
