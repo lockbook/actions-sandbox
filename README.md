@@ -15,3 +15,11 @@ gh workflow run lb-rs-tests.yml -R lockbook/actions-sandbox -f ref=<sha|branch> 
 - `patch`: a file in `patches/` applied to the lockbook checkout before building. Put minimal failing tests for reproductions there.
 
 Save the run URL immediately after dispatch and record it in the token-sink findings note.
+
+## cli smoke
+
+Builds the `lockbook` CLI, creates a throwaway account on the local server, writes a few files, and prints every `lockbook list` variant through `cat -A` so whitespace and line endings are visible. Then pipes `list` output into `cat` and `edit` (with `scripts/append-editor.sh` as a non-interactive editor).
+
+```
+gh workflow run cli-smoke.yml -R lockbook/actions-sandbox -f ref=<sha|branch>
+```

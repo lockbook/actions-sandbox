@@ -1,0 +1,129 @@
+name: cli smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: lockbook/lockbook ref to test (branch, tag, or commit)
+        default: master
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      API_URL: http://localhost:8000
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: lockbook/lockbook
+          ref: ${{ inputs.ref }}
+          path: lockbook
+
+      - name: Record revision
+        working-directory: lockbook
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "lockbook revision: $sha"
+          echo "## lockbook revision" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$sha\` (ref \`${{ inputs.ref }}\`)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config cmake libfontconfig1-dev psmisc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lockbook
+
+      - name: Start server
+        working-directory: lockbook
+        run: cargo run -p lbdev -- ci start-server
+
+      - name: Build CLI
+        working-directory: lockbook
+        run: cargo build -p lockbook
+
+      - name: Create account and files
+        working-directory: lockbook
+        env:
+          LOCKBOOK_PATH: ${{ runner.temp }}/lb-a
+        run: |
+          set -x
+          mkdir -p "$LOCKBOOK_PATH"
+          PATH="$PWD/target/debug:$PATH"
+          lockbook account new "smoke$RANDOM$RANDOM" --api_url "$API_URL"
+          lockbook new /notes/
+          lockbook new /notes/deep/
+          echo "todo body" | lockbook write /notes/todo.md
+          echo "deep body" | lockbook write /notes/deep/er/file.md
+          echo "spaces body" | lockbook write "/a name with spaces.md"
+          echo "root body" | lockbook write /short.md
+          lockbook sync
+
+      - name: list output (cat -A shows every trailing space and line end)
+        working-directory: lockbook
+        env:
+          LOCKBOOK_PATH: ${{ runner.temp }}/lb-a
+        run: |
+          PATH="$PWD/target/debug:$PATH"
+          out="$GITHUB_WORKSPACE/list-output.txt"
+          for args in "" "-p" "-R /" "-l" "-l -R /" "/notes"; do
+            {
+              echo "### lockbook list $args"
+              lockbook list $args | cat -A
+              echo
+            } | tee -a "$out"
+          done
+
+      - name: Pipe list into cat and edit
+        working-directory: lockbook
+        env:
+          LOCKBOOK_PATH: ${{ runner.temp }}/lb-a
+          LOCKBOOK_EDITOR: ${{ github.workspace }}/scripts/append-editor.sh
+        run: |
+          set -x
+          PATH="$PWD/target/debug:$PATH"
+          lockbook list -p -R / | grep -v '/$' | while IFS= read -r p; do
+            lockbook cat "$p" > /dev/null && echo "cat ok: [$p]"
+          done
+          lockbook list -p -R / | grep todo.md | xargs lockbook edit
+          lockbook cat /notes/todo.md
+          lockbook edit "$(lockbook list -p -R / | grep spaces)"
+          lockbook cat "/a name with spaces.md"
+          lockbook sync
+          lockbook account status
+
+      - name: Upload list output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: list-output
+          path: list-output.txt
+          if-no-files-found: ignore
+
+      - name: Collect server log
+        if: always()
+        working-directory: lockbook
+        run: cargo run -p lbdev -- ci server-logs > "$GITHUB_WORKSPACE/server_log.txt" || true
+
+      - name: Upload server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log
+          path: server_log.txt
+          if-no-files-found: ignore
+
+      - name: Stop server
+        if: always()
+        working-directory: lockbook
+        run: cargo run -p lbdev -- ci kill-server || true
