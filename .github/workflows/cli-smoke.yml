@@ -60,7 +60,7 @@ jobs:
           set -x
           mkdir -p "$LOCKBOOK_PATH"
           PATH="$PWD/target/debug:$PATH"
-          lockbook account new "smoke$RANDOM$RANDOM" --api_url "$API_URL"
+          lockbook account new "smoke$RANDOM$RANDOM" --api_url="$API_URL"
           lockbook new /notes/
           lockbook new /notes/deep/
           echo "todo body" | lockbook write /notes/todo.md
