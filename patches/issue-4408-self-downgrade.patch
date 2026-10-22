@@ -1,9 +1,9 @@
 diff --git a/libs/lb/lb-rs/tests/retest_4408_self_downgrade.rs b/libs/lb/lb-rs/tests/retest_4408_self_downgrade.rs
 new file mode 100644
-index 0000000..bb344df
+index 0000000..6b267d8
 --- /dev/null
 +++ b/libs/lb/lb-rs/tests/retest_4408_self_downgrade.rs
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,80 @@
 +use lb_rs::model::errors::LbErrKind;
 +use lb_rs::model::file::ShareMode;
 +use test_utils::*;
@@ -30,6 +30,9 @@ index 0000000..bb344df
 +    let (a, b, id, name_b) = write_shared_doc().await;
 +
 +    let result = b.share_file(id, &name_b, ShareMode::Read).await;
++    let sharee_local = b.get_file_by_id(id).await.unwrap().shares;
++    println!("share_file result: {result:?}");
++    println!("sharee local shares before sync: {sharee_local:?}");
 +
 +    b.sync().await.unwrap();
 +    a.sync().await.unwrap();
@@ -37,6 +40,10 @@ index 0000000..bb344df
 +
 +    let shares_a = a.get_file_by_id(id).await.unwrap().shares;
 +    let shares_b = b.get_file_by_id(id).await.unwrap().shares;
++    println!("owner shares after sync: {shares_a:?}");
++    println!("sharee shares after sync: {shares_b:?}");
++    println!("owner path listing: {:?}", a.list_paths(None).await.unwrap());
++    println!("sharee path listing: {:?}", b.list_paths(None).await.unwrap());
 +    assert_eq!(shares_a.len(), 1, "owner sees exactly one share: {shares_a:?}");
 +    assert_eq!(shares_b.len(), 1, "sharee sees exactly one share: {shares_b:?}");
 +    assert_eq!(shares_a[0].shared_with, name_b);

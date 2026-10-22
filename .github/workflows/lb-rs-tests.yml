@@ -61,6 +61,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: lockbook
+          cache-on-failure: true
 
       - name: Start server
         working-directory: lockbook
