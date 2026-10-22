@@ -39,3 +39,11 @@ Same idea as `cli smoke` but on `windows-latest` with PowerShell steps. Builds t
 ```
 gh workflow run cli-smoke-windows.yml -R lockbook/actions-sandbox -f ref=<sha|branch>
 ```
+
+## headless tests
+
+No server and no system packages. Runs `cargo test --no-fail-fast` for `workspace`, `lockbook-desktop`, `lockbook` (cli), and `test_utils`, one step per package with `continue-on-error` so every package reports; a final step fails the job if any package failed and writes the per-package outcome to the step summary.
+
+```
+gh workflow run headless-tests.yml -R lockbook/actions-sandbox -f ref=<sha|branch>
+```
