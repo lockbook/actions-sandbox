@@ -48,9 +48,30 @@ jobs:
         working-directory: lockbook
         run: cargo run -p lbdev -- ci start-server
 
-      - name: Build CLI
+      - name: Build CLI (--locked, lb-rs rebuilt so rustc warnings are visible)
         working-directory: lockbook
-        run: cargo build -p lockbook
+        run: |
+          cargo clean -p lb-rs -p lockbook
+          cargo build -p lockbook --locked 2>&1 | tee "$GITHUB_WORKSPACE/build-cli.log"
+          test "${PIPESTATUS[0]}" -eq 0
+
+      - name: Summarize build warnings
+        run: |
+          {
+            echo "## cargo build -p lockbook --locked warnings"
+            echo
+            echo '```'
+            grep -E "^warning" build-cli.log | sed -E 's/\x1b\[[0-9;]*m//g' | sort | uniq -c || true
+            echo '```'
+            echo
+            echo "deprecated: $(grep -c 'use of deprecated' build-cli.log || true)"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-cli-log
+          path: build-cli.log
 
       - name: Create account and files
         working-directory: lockbook

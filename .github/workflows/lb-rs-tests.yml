@@ -69,7 +69,7 @@ jobs:
 
       - name: Run lb-rs tests
         working-directory: lockbook
-        run: cargo test -p lb-rs --no-fail-fast -- ${{ inputs.filter }}
+        run: cargo test -p lb-rs --locked --no-fail-fast -- ${{ inputs.filter }}
 
       - name: Collect server log
         if: always()
