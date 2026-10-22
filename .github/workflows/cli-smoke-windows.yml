@@ -93,7 +93,7 @@ jobs:
           Set-PSDebug -Trace 1
           New-Item -ItemType Directory -Force -Path $env:LOCKBOOK_PATH | Out-Null
           $env:PATH = "$PWD\target\debug;$env:PATH"
-          lockbook account new "smoke$(Get-Random)" --api_url $env:API_URL
+          lockbook account new "smoke$(Get-Random)" --api_url="$env:API_URL"
           lockbook new /notes/
           Write-Output "todo body" | lockbook write /notes/todo.md
           lockbook list
