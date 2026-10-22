@@ -1,0 +1,79 @@
+diff --git a/libs/lb/lb-rs/tests/retest_4408_self_downgrade.rs b/libs/lb/lb-rs/tests/retest_4408_self_downgrade.rs
+new file mode 100644
+index 0000000..bb344df
+--- /dev/null
++++ b/libs/lb/lb-rs/tests/retest_4408_self_downgrade.rs
+@@ -0,0 +1,73 @@
++use lb_rs::model::errors::LbErrKind;
++use lb_rs::model::file::ShareMode;
++use test_utils::*;
++
++async fn write_shared_doc() -> (lb_rs::Lb, lb_rs::Lb, uuid::Uuid, String) {
++    let a = test_core_with_account().await;
++    let b = test_core_with_account().await;
++    let name_b = b.get_account().unwrap().username.clone();
++
++    let doc = a.create_at_path("/doc.md").await.unwrap();
++    a.write_document(doc.id, b"owner wrote this").await.unwrap();
++    a.share_file(doc.id, &name_b, ShareMode::Write)
++        .await
++        .unwrap();
++    a.sync().await.unwrap();
++    b.sync().await.unwrap();
++    b.create_link_at_path("/link.md", doc.id).await.unwrap();
++    b.sync().await.unwrap();
++    (a, b, doc.id, name_b)
++}
++
++#[tokio::test]
++async fn retest_4408_sharee_downgrades_self_to_read() {
++    let (a, b, id, name_b) = write_shared_doc().await;
++
++    let result = b.share_file(id, &name_b, ShareMode::Read).await;
++
++    b.sync().await.unwrap();
++    a.sync().await.unwrap();
++    b.sync().await.unwrap();
++
++    let shares_a = a.get_file_by_id(id).await.unwrap().shares;
++    let shares_b = b.get_file_by_id(id).await.unwrap().shares;
++    assert_eq!(shares_a.len(), 1, "owner sees exactly one share: {shares_a:?}");
++    assert_eq!(shares_b.len(), 1, "sharee sees exactly one share: {shares_b:?}");
++    assert_eq!(shares_a[0].shared_with, name_b);
++    assert_eq!(shares_a[0].mode, shares_b[0].mode, "owner and sharee disagree on mode");
++
++    match result {
++        Ok(()) => {
++            assert_eq!(shares_a[0].mode, ShareMode::Read);
++            assert_matches!(
++                b.write_document(id, b"sharee edit").await.unwrap_err().kind,
++                LbErrKind::InsufficientPermission
++            );
++        }
++        Err(e) => {
++            assert_eq!(shares_a[0].mode, ShareMode::Write, "errored but state changed: {e:?}");
++            b.write_document(id, b"sharee edit").await.unwrap();
++            b.sync().await.unwrap();
++        }
++    }
++
++    assert_eq!(b.read_document(id, false).await.unwrap().len() > 0, true);
++    a.write_document(id, b"owner edit after").await.unwrap();
++    a.sync().await.unwrap();
++    b.sync().await.unwrap();
++    assert_eq!(b.read_document(id, false).await.unwrap(), b"owner edit after");
++}
++
++#[tokio::test]
++async fn retest_4408_sharee_reshares_self_with_same_mode() {
++    let (a, b, id, name_b) = write_shared_doc().await;
++
++    let result = b.share_file(id, &name_b, ShareMode::Write).await;
++    assert_matches!(result.unwrap_err().kind, LbErrKind::ShareAlreadyExists);
++
++    b.sync().await.unwrap();
++    a.sync().await.unwrap();
++    let shares_a = a.get_file_by_id(id).await.unwrap().shares;
++    assert_eq!(shares_a.len(), 1);
++    assert_eq!(shares_a[0].mode, ShareMode::Write);
++}
