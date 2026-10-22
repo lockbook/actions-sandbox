@@ -34,7 +34,7 @@ gh workflow run server-tests.yml -R lockbook/actions-sandbox -f ref=<sha|branch>
 
 ## cli smoke windows
 
-Same idea as `cli smoke` but on `windows-latest` with PowerShell steps. Builds the CLI and a release server, starts the server directly (lbdev's `ci start-server` relies on `fuser` and `/tmp`), polls `/get-build-info` until it answers, then creates an account, writes a file, and runs `list`, `cat`, `sync`, and `account status`. Server stdout, stderr, and `lockbook_server.log` are uploaded as the `server-log` artifact.
+Same idea as `cli smoke` but on `windows-latest` with PowerShell steps. Builds the CLI and a release server (with `RUSTFLAGS=-l advapi32`, which the server's shadow-rs/libgit2 build script needs to link on MSVC), then in a single step starts the server directly (lbdev's `ci start-server` relies on `fuser` and `/tmp`), polls `/get-build-info` until it answers, creates an account, writes a file, runs `list`, `cat`, `sync`, and `account status`, and stops the server in a `finally`. The server lives in the same step because the Windows runner kills a step's process tree when the step ends. Server stdout, stderr, and `lockbook_server.log` are uploaded as the `server-log` artifact.
 
 ```
 gh workflow run cli-smoke-windows.yml -R lockbook/actions-sandbox -f ref=<sha|branch>
