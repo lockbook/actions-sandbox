@@ -1,0 +1,125 @@
+name: cli smoke windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: lockbook/lockbook ref to test (branch, tag, or commit)
+        default: master
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      API_URL: http://localhost:8000
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: lockbook/lockbook
+          ref: ${{ inputs.ref }}
+          path: lockbook
+
+      - name: Record revision
+        working-directory: lockbook
+        run: |
+          $sha = git rev-parse HEAD
+          Write-Host "lockbook revision: $sha"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## lockbook revision"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "``$sha`` (ref ``${{ inputs.ref }}``)"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lockbook
+
+      - name: Build CLI
+        working-directory: lockbook
+        run: cargo build -p lockbook
+
+      - name: Build server
+        working-directory: lockbook
+        run: cargo build -p lockbook-server --release
+
+      - name: Start server
+        working-directory: lockbook
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Content server/local.env | ForEach-Object {
+            $line = $_.Trim() -replace '\s+#.*$', ''
+            if ($line -eq '' -or $line.StartsWith('#')) { return }
+            $name, $value = $line -split '=', 2
+            $value = $value.Trim().Trim('"')
+            $value = [regex]::Replace($value, '\$\{\w+:=([^}]*)\}', '$1')
+            if ($value -ne '') { [Environment]::SetEnvironmentVariable($name.Trim(), $value, 'Process') }
+          }
+          $env:INDEX_DB_LOCATION = "$env:RUNNER_TEMP\lbdev"
+          $env:FILES_PATH = "$env:RUNNER_TEMP\lbdev\docs"
+          $env:LOG_PATH = "$env:RUNNER_TEMP"
+          $env:STRIPE_SIGNING_SECRET = 'whsec_placeholder'
+          New-Item -ItemType Directory -Force -Path $env:FILES_PATH | Out-Null
+          $proc = Start-Process -FilePath "$PWD\target\release\lockbook-server.exe" -WorkingDirectory $PWD -PassThru `
+            -RedirectStandardOutput "$env:RUNNER_TEMP\server_stdout.txt" -RedirectStandardError "$env:RUNNER_TEMP\server_stderr.txt"
+          Add-Content -Path $env:GITHUB_ENV -Value "SERVER_PID=$($proc.Id)"
+          $deadline = (Get-Date).AddSeconds(120)
+          while ($true) {
+            if ($proc.HasExited) { throw "server exited with code $($proc.ExitCode)" }
+            try {
+              $resp = Invoke-WebRequest -Uri "$env:API_URL/get-build-info" -UseBasicParsing -TimeoutSec 5
+              Write-Host "server up: $($resp.Content)"
+              break
+            } catch {
+              if ((Get-Date) -gt $deadline) { throw "server did not answer within 120s" }
+              Start-Sleep -Seconds 2
+            }
+          }
+
+      - name: CLI smoke
+        working-directory: lockbook
+        env:
+          LOCKBOOK_PATH: ${{ runner.temp }}\lb-a
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          Set-PSDebug -Trace 1
+          New-Item -ItemType Directory -Force -Path $env:LOCKBOOK_PATH | Out-Null
+          $env:PATH = "$PWD\target\debug;$env:PATH"
+          lockbook account new "smoke$(Get-Random)" --api_url $env:API_URL
+          lockbook new /notes/
+          Write-Output "todo body" | lockbook write /notes/todo.md
+          lockbook list
+          lockbook list -l -R /
+          lockbook cat /notes/todo.md
+          lockbook sync
+          lockbook account status
+
+      - name: Collect server log
+        if: always()
+        run: |
+          Copy-Item "$env:RUNNER_TEMP\server_stdout.txt" "$env:GITHUB_WORKSPACE\server_log.txt" -ErrorAction SilentlyContinue
+          Copy-Item "$env:RUNNER_TEMP\server_stderr.txt" "$env:GITHUB_WORKSPACE\server_stderr.txt" -ErrorAction SilentlyContinue
+          Copy-Item "$env:RUNNER_TEMP\lockbook_server.log" "$env:GITHUB_WORKSPACE\lockbook_server.log" -ErrorAction SilentlyContinue
+
+      - name: Upload server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log
+          path: |
+            server_log.txt
+            server_stderr.txt
+            lockbook_server.log
+          if-no-files-found: ignore
+
+      - name: Stop server
+        if: always()
+        run: if ($env:SERVER_PID) { Stop-Process -Id $env:SERVER_PID -Force -ErrorAction SilentlyContinue }
