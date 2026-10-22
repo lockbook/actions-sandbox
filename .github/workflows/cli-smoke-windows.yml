@@ -52,10 +52,13 @@ jobs:
           RUSTFLAGS: -l advapi32
         run: cargo build -p lockbook-server --release
 
-      - name: Start server
+      - name: Start server and run CLI smoke
         working-directory: lockbook
+        env:
+          LOCKBOOK_PATH: ${{ runner.temp }}\lb-a
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           Get-Content server/local.env | ForEach-Object {
             $line = $_.Trim() -replace '\s+#.*$', ''
             if ($line -eq '' -or $line.StartsWith('#')) { return }
@@ -68,41 +71,36 @@ jobs:
           $env:FILES_PATH = "$env:RUNNER_TEMP\lbdev\docs"
           $env:LOG_PATH = "$env:RUNNER_TEMP"
           $env:STRIPE_SIGNING_SECRET = 'whsec_placeholder'
-          New-Item -ItemType Directory -Force -Path $env:FILES_PATH | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:FILES_PATH, $env:LOCKBOOK_PATH | Out-Null
           $proc = Start-Process -FilePath "$PWD\target\release\lockbook-server.exe" -WorkingDirectory $PWD -PassThru `
             -RedirectStandardOutput "$env:RUNNER_TEMP\server_stdout.txt" -RedirectStandardError "$env:RUNNER_TEMP\server_stderr.txt"
-          Add-Content -Path $env:GITHUB_ENV -Value "SERVER_PID=$($proc.Id)"
-          $deadline = (Get-Date).AddSeconds(120)
-          while ($true) {
-            if ($proc.HasExited) { throw "server exited with code $($proc.ExitCode)" }
-            try {
-              $resp = Invoke-WebRequest -Uri "$env:API_URL/get-build-info" -UseBasicParsing -TimeoutSec 5
-              Write-Host "server up: $($resp.Content)"
-              break
-            } catch {
-              if ((Get-Date) -gt $deadline) { throw "server did not answer within 120s" }
-              Start-Sleep -Seconds 2
+          try {
+            $deadline = (Get-Date).AddSeconds(120)
+            while ($true) {
+              if ($proc.HasExited) { throw "server exited with code $($proc.ExitCode)" }
+              try {
+                $resp = Invoke-WebRequest -Uri "$env:API_URL/get-build-info" -UseBasicParsing -TimeoutSec 5
+                Write-Host "server up: $($resp.Content)"
+                break
+              } catch {
+                if ((Get-Date) -gt $deadline) { throw "server did not answer within 120s" }
+                Start-Sleep -Seconds 2
+              }
             }
+            $env:PATH = "$PWD\target\debug;$env:PATH"
+            Set-PSDebug -Trace 1
+            lockbook account new "smoke$(Get-Random)" --api_url="$env:API_URL"
+            lockbook new /notes/
+            Write-Output "todo body" | lockbook write /notes/todo.md
+            lockbook list
+            lockbook list -l -R /
+            lockbook cat /notes/todo.md
+            lockbook sync
+            lockbook account status
+            Set-PSDebug -Off
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
-
-      - name: CLI smoke
-        working-directory: lockbook
-        env:
-          LOCKBOOK_PATH: ${{ runner.temp }}\lb-a
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          Set-PSDebug -Trace 1
-          New-Item -ItemType Directory -Force -Path $env:LOCKBOOK_PATH | Out-Null
-          $env:PATH = "$PWD\target\debug;$env:PATH"
-          lockbook account new "smoke$(Get-Random)" --api_url="$env:API_URL"
-          lockbook new /notes/
-          Write-Output "todo body" | lockbook write /notes/todo.md
-          lockbook list
-          lockbook list -l -R /
-          lockbook cat /notes/todo.md
-          lockbook sync
-          lockbook account status
 
       - name: Collect server log
         if: always()
@@ -121,7 +119,3 @@ jobs:
             server_stderr.txt
             lockbook_server.log
           if-no-files-found: ignore
-
-      - name: Stop server
-        if: always()
-        run: if ($env:SERVER_PID) { Stop-Process -Id $env:SERVER_PID -Force -ErrorAction SilentlyContinue }
