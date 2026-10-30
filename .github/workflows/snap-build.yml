@@ -38,6 +38,12 @@ jobs:
         run: |
           echo "lockbook revision: $(git rev-parse HEAD)"
           grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release
+          dpkg --print-architecture
+          dpkg --print-foreign-architectures
+          apt-config dump | grep -iE 'arch|variant' || true
+          ls -la /etc/apt/sources.list /etc/apt/sources.list.d /etc/apt/apt.conf.d || true
+          for f in /etc/apt/sources.list /etc/apt/sources.list.d/*; do echo "--- $f"; cat "$f"; done || true
+          ls /var/lib/apt/lists | head -40
 
       - name: Point lb_version at the release tag
         run: |
@@ -60,6 +66,11 @@ jobs:
 
       - name: Pack with lbdev
         run: cargo run -p lbdev -- releaser linux ${{ matrix.target }} snap
+
+      - name: Dump snapcraft log
+        if: failure()
+        run: |
+          sudo sh -c 'ls -t /root/.local/state/snapcraft/log/*.log | head -1 | xargs cat' | tail -250
 
       - name: Inspect and install
         run: |
