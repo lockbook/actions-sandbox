@@ -1,0 +1,83 @@
+name: snap build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: lockbook/lockbook ref whose lbdev writes the snapcraft.yaml
+        default: master
+        type: string
+      version:
+        description: lockbook release tag the snap builds from (source-tag)
+        required: true
+        type: string
+      runner:
+        default: ubuntu-26.04
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  snap:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [cli, desktop]
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: lockbook/lockbook
+          ref: ${{ inputs.ref }}
+
+      - name: Record revision and host
+        run: |
+          echo "lockbook revision: $(git rev-parse HEAD)"
+          grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release
+
+      - name: Point lb_version at the release tag
+        run: |
+          sed -i '0,/^version = ".*"/s//version = "${{ inputs.version }}"/' libs/lb/lb-rs/Cargo.toml
+          grep -m1 '^version' libs/lb/lb-rs/Cargo.toml
+
+      - name: Setup Snapcraft
+        run: sudo snap install snapcraft --classic
+
+      - name: Stub out store upload
+        run: |
+          mkdir -p "$HOME/stub-bin"
+          cat > "$HOME/stub-bin/snapcraft" <<'EOF'
+          #!/bin/sh
+          if [ "$1" = upload ]; then echo "skipped: snapcraft $*"; exit 0; fi
+          exec /snap/bin/snapcraft "$@"
+          EOF
+          chmod +x "$HOME/stub-bin/snapcraft"
+          echo "$HOME/stub-bin" >> "$GITHUB_PATH"
+
+      - name: Pack with lbdev
+        run: cargo run -p lbdev -- releaser linux ${{ matrix.target }} snap
+
+      - name: Inspect and install
+        run: |
+          dir=utils/dev/snap-packages/lockbook
+          [ "${{ matrix.target }}" = desktop ] && dir=$dir-desktop
+          cat "$dir/snap/snapcraft.yaml"
+          ls -la "$dir"/*.snap
+          unsquashfs -ll "$dir"/*.snap | head -60
+          sudo snap install --dangerous "$dir"/*.snap
+          snap list
+          snap connections "$(basename "$dir")"
+
+      - name: Smoke test CLI
+        if: matrix.target == 'cli'
+        run: |
+          lockbook completions bash | head -5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snap-${{ matrix.target }}
+          path: utils/dev/snap-packages/*/*.snap
