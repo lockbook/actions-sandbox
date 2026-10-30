@@ -50,6 +50,13 @@ jobs:
           sed -i '0,/^version = ".*"/s//version = "${{ inputs.version }}"/' libs/lb/lb-rs/Cargo.toml
           grep -m1 '^version' libs/lb/lb-rs/Cargo.toml
 
+      - name: Use baseline amd64 apt indexes
+        run: |
+          sudo rm -f /etc/apt/apt.conf.d/90arch-variant
+          sudo apt-get update
+          apt-config dump | grep -i variant || echo "no arch variants"
+          ls /var/lib/apt/lists | grep -c '_binary-amd64_Packages'
+
       - name: Setup Snapcraft
         run: sudo snap install snapcraft --classic
 
